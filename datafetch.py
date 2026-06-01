@@ -27,6 +27,7 @@ PERIOD_YF   = "5d"
 OUT_FILE    = "data/testdata.parquet"
 
 SCHEMA = pa.schema([
+    ("sno",       pa.int32()),
     ("datetime",  pa.timestamp("ns", tz="UTC")),
     ("open",      pa.float64()),
     ("high",      pa.float64()),
@@ -35,7 +36,6 @@ SCHEMA = pa.schema([
     ("adj_close", pa.float64()),
     ("volume",    pa.float64()),
     ("symbol",    pa.string()),
-    ("source",    pa.string()),
 ])
 
 os.makedirs("data", exist_ok=True)
@@ -60,14 +60,6 @@ def fetch_yfinance():
         df = df.reset_index()
         df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
         df["symbol"]   = symbol.replace(".NS", "_NS")
-        df["source"]   = "yfinance"
-
-        mem = df.memory_usage(deep=True).sum() / 1024**2
-        print(f"  shape  : {df.shape}")
-        print(f"  memory : {mem:.2f} MB")
-        print(f"  range  : {df['datetime'].iloc[0]} → {df['datetime'].iloc[-1]}")
-        print(df.head(3))
-        print()
 
         frames.append(df)
         del df
@@ -93,15 +85,7 @@ def fetch_tvdatafeed():
         df = df.reset_index()
         df["datetime"]  = pd.to_datetime(df["datetime"], utc=True)
         df["symbol"]    = f"{symbol}_NS"
-        df["source"]    = "tvdatafeed"
         df["adj_close"] = float("nan")
-
-        mem = df.memory_usage(deep=True).sum() / 1024**2
-        print(f"  shape  : {df.shape}")
-        print(f"  memory : {mem:.2f} MB")
-        print(f"  range  : {df['datetime'].iloc[0]} → {df['datetime'].iloc[-1]}")
-        print(df.head(3))
-        print()
 
         frames.append(df)
         del df
@@ -127,13 +111,23 @@ if __name__ == "__main__":
 
     print("Combining and writing to parquet...")
     combined = pd.concat(frames, ignore_index=True)
-    combined = combined[["datetime", "open", "high", "low", "close",
-                          "adj_close", "volume", "symbol", "source"]]
+    combined = combined[["datetime", "open", "high", "low", "close", "adj_close", "volume", "symbol"]]
+
+    # sort by symbol then datetime, then assign per-symbol sno starting from 1
+    combined = combined.sort_values(["symbol", "datetime"]).reset_index(drop=True)
+    combined["sno"] = combined.groupby("symbol").cumcount() + 1
+    combined = combined[["sno", "datetime", "open", "high", "low", "close", "adj_close", "volume", "symbol"]]
+
     table = pa.Table.from_pandas(combined, schema=SCHEMA, preserve_index=False)
     pq.write_table(table, OUT_FILE)
 
-    print(f"Total rows : {len(combined)}")
+    print(f"\nTotal rows : {len(combined)}")
     print(f"Memory     : {combined.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-    print(f"Saved      → {OUT_FILE}")
+    print(f"Saved      -> {OUT_FILE}\n")
+
+    for symbol, group in combined.groupby("symbol"):
+        print(f"{symbol} -- {len(group)} bars | sno {group['sno'].iloc[0]} -> {group['sno'].iloc[-1]} | {group['datetime'].iloc[0]} -> {group['datetime'].iloc[-1]}")
+    print()
+    # print(combined.to_string()) # prints all entries
 
     del combined, table
