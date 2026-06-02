@@ -1,0 +1,8 @@
+uvicorn
+pyarrow
+pandas
+fastapi
+pydantic
+numpy
+yfinance
+tvdatafeed @ git+https://github.com/rongardF/tvdatafeed.git
