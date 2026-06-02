@@ -5,7 +5,6 @@ import pyarrow.parquet as pq
 import yfinance as yf
 import pandas as pd
 from tvDatafeed import TvDatafeed, Interval
-from credentials import TV_USERNAME, TV_PASSWORD
 
 # --- config ---
 SYMBOLS_YF = [
@@ -69,7 +68,7 @@ def fetch_yfinance():
 
 def fetch_tvdatafeed():
     frames = []
-    tv = TvDatafeed(TV_USERNAME, TV_PASSWORD)
+    tv = TvDatafeed()  # anonymous login, no credentials needed
 
     for symbol in SYMBOLS_TV:
         print(f"Fetching {symbol} from tvdatafeed...")
@@ -83,7 +82,7 @@ def fetch_tvdatafeed():
         df.columns = [c.lower() for c in df.columns]
         df.index.name = "datetime"
         df = df.reset_index()
-        df["datetime"]  = pd.to_datetime(df["datetime"], utc=True)
+        df["datetime"]  = pd.to_datetime(df["datetime"]).dt.tz_localize("Asia/Kolkata").dt.tz_convert("UTC")
         df["symbol"]    = f"{symbol}_NS"
         df["adj_close"] = float("nan")
 
@@ -128,6 +127,6 @@ if __name__ == "__main__":
     for symbol, group in combined.groupby("symbol"):
         print(f"{symbol} -- {len(group)} bars | sno {group['sno'].iloc[0]} -> {group['sno'].iloc[-1]} | {group['datetime'].iloc[0]} -> {group['datetime'].iloc[-1]}")
     print()
-    # print(combined.to_string()) # prints all entries
+    print(combined.to_string()) # prints all entries
 
     del combined, table
