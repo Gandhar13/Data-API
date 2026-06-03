@@ -119,20 +119,45 @@ def _drop_empty_buckets(df: pd.DataFrame) -> pd.DataFrame:
 def _resample_intraday(df: pd.DataFrame, pandas_freq: str, anchor_ist: str) -> pd.DataFrame:
     """
     Resample to 1H / 2H / 4H.
-    Uses origin="start" so buckets are anchored to the first actual
-    bar in the data (e.g. 09:00 IST) — no phantom empty buckets.
+    Buckets are anchored to 09:15 IST and restart fresh every trading day,
+    so cross-day drift is impossible regardless of session length.
+
+    Strategy:
+    - Parse anchor_ist (e.g. "09:15") to get open_minutes (555 for 09:15)
+    - Parse pandas_freq (e.g. "2h") to get bucket_size_minutes (120)
+    - For each bar: bucket_index = floor((bar_minutes_since_midnight - open_minutes) / bucket_size)
+    - Group by (date, bucket_index) and aggregate
+    - Stamp each bucket at: date 00:00 IST + open_minutes + bucket_index * bucket_size
     """
-    agg = _build_agg(df)
-    df_ist = _to_ist(df)
+    agg        = _build_agg(df)
+    df_ist     = _to_ist(df)
 
-    resampled = (
-        df_ist
-        .resample(pandas_freq, origin="start", closed="left", label="left")
-        .agg(agg)
-        .pipe(_drop_empty_buckets)
-    )
+    # parse anchor "09:15" -> open_minutes = 555
+    open_h, open_m  = map(int, anchor_ist.split(":"))
+    open_minutes    = open_h * 60 + open_m
 
-    return _to_utc(resampled)
+    # parse pandas_freq "1h"/"2h"/"4h" -> bucket_size_minutes
+    bucket_size_minutes = int(pandas_freq.lower().replace("h", "")) * 60
+
+    # compute per-bar bucket index anchored to session open
+    bar_minutes   = df_ist.index.hour * 60 + df_ist.index.minute
+    bucket_index  = (bar_minutes - open_minutes) // bucket_size_minutes
+
+    # group by (calendar date in IST, bucket index) and aggregate
+    date_key      = df_ist.index.normalize()
+    group_key     = [date_key, bucket_index]
+    resampled     = df_ist.groupby(group_key).agg(agg)
+
+    # rebuild index: date + open_minutes + bucket_index * bucket_size -> IST timestamp
+    dates, buckets = zip(*resampled.index)
+    bucket_ts = pd.DatetimeIndex([
+        d + pd.Timedelta(minutes=int(open_minutes + b * bucket_size_minutes))
+        for d, b in zip(dates, buckets)
+    ])
+    resampled.index     = bucket_ts
+    resampled.index.name = "datetime"
+
+    return _to_utc(_drop_empty_buckets(resampled))
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +242,7 @@ def _resample_monthly(df: pd.DataFrame) -> pd.DataFrame:
 
     month_key  = df_naive.index.to_period("M")
     resampled  = df_naive.groupby(month_key).agg(agg)
-    first_bars = df_naive.groupby(month_key).apply(lambda g: g.index[0])
+    first_bars = df_naive.groupby(month_key).nth(0).index
 
     # re-attach IST timezone to the first-bar timestamps
     first_ts = pd.DatetimeIndex(first_bars.values).tz_localize(IST)

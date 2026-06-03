@@ -19,7 +19,7 @@ SYMBOLS_TV = [
 ]
 
 TV_EXCHANGE = "NSE"
-TV_BARS     = 50
+TV_BARS     = 2730
 
 INTERVAL_YF = "30m"
 PERIOD_YF   = "5d"
@@ -127,6 +127,6 @@ if __name__ == "__main__":
     for symbol, group in combined.groupby("symbol"):
         print(f"{symbol} -- {len(group)} bars | sno {group['sno'].iloc[0]} -> {group['sno'].iloc[-1]} | {group['datetime'].iloc[0]} -> {group['datetime'].iloc[-1]}")
     print()
-    print(combined.to_string()) # prints all entries
+    # print(combined.to_string()) # prints all entries
 
     del combined, table
